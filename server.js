@@ -8,6 +8,9 @@ import { db } from './db.js';
 import { createUser, findUserByUsername, findUserById } from './models/users.js';
 import { verifyPassword } from './auth.js';
 import { createSession, findSession, deleteSession } from './models/sessions.js';
+import { createRandomBoard } from '@april-cs-npm/arcade-core';
+import { createGame, listGames, findGame, joinGame } from './models/games.js';
+
 
 
 const app = new Hono();
@@ -92,6 +95,58 @@ app.onError((err, c) => {
   console.error(err);
   return c.json({ error: 'Internal error' }, 500);
 });
+
+
+// CREATE a game — the logged-in user becomes player 1
+app.post('/api/games', async (c) => {
+  const user = await getCurrentUser(c);   // from auth step
+  if (!user) {
+    throw new HTTPException(401, { message: 'not logged in' });
+  }
+
+  const game = await createGame(user._id);   // player 1 is the logged-in user
+  return c.json(game, 201);
+});
+
+
+// LIST games (lobby + your games)
+app.get('/api/games', async (c) => {
+  const user = await getCurrentUser(c);
+  if (!user) {
+    throw new HTTPException(401, { message: 'not logged in' });
+  }
+  const all = await listGames(user._id);
+  return c.json(all);
+});
+
+
+// JOIN an open game as player 2
+app.post('/api/games/:id/join', async (c) => {
+  const user = await getCurrentUser(c);
+  if (!user) {
+    throw new HTTPException(401, { message: 'not logged in' });
+  }
+
+  const game = await findGame(c.req.param('id'));
+  if (!game) {
+    throw new HTTPException(404, { message: 'game not found' });
+  }
+
+  // can't join a game that already has two players / isn't waiting
+  if (game.status !== 'waiting') {
+    throw new HTTPException(409, { message: 'game is not open to join' });
+  }
+  // can't join your own game
+  if (game.player1.toString() === user._id.toString()) {
+    throw new HTTPException(409, { message: 'cannot join your own game' });
+  }
+
+  const updated = await joinGame(game._id, user._id);
+  return c.json(updated);
+});
+
+
+
 
 app.get('/', (c) => c.text('Arcade API is running'));
 
