@@ -2,14 +2,98 @@
 // Author: April Yang
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
-import { db } from './db.js'; // import runs the MongoDB connection
+import { HTTPException } from 'hono/http-exception';
+import { setCookie, getCookie, deleteCookie } from 'hono/cookie';
+import { db } from './db.js';
+import { createUser, findUserByUsername, findUserById } from './models/users.js';
+import { verifyPassword } from './auth.js';
+import { createSession, findSession, deleteSession } from './models/sessions.js';
 
 
 const app = new Hono();
+const COOKIE = 'sessionId';
+
+// set the session cookie (omit `secure` so it works over http for local/Bruno testing)
+function setSessionCookie(c, sessionId) {
+  setCookie(c, COOKIE, sessionId, {
+    path: '/', httpOnly: true, sameSite: 'Lax', maxAge: 60 * 60 * 24 * 7,
+  });
+}
+
+// read the session cookie -> session -> user; returns the user or null
+async function getCurrentUser(c) {
+  const sessionId = getCookie(c, COOKIE);
+  const session = await findSession(sessionId);
+  if (!session) return null;
+  const { findUserById } = await import('./models/users.js');
+  return await findUserById(session.userId);
+}
+
+
+// REGISTER
+app.post('/api/auth/register', async (c) => {
+  const body = await c.req.json();
+  if (!body.username || !body.password) {
+    throw new HTTPException(400, { message: 'username and password are required' });
+  }
+  // no duplicate usernames
+  const existing = await findUserByUsername(body.username);
+  if (existing) {
+    throw new HTTPException(409, { message: 'username already taken' });
+  }
+
+  const user = await createUser(body.username, body.password);  // hashes inside
+  const sessionId = await createSession(user._id);
+  setSessionCookie(c, sessionId);
+  return c.json(user, 201);   // user has no passwordHash
+});
+
+// LOGIN
+app.post('/api/auth/login', async (c) => {
+  const body = await c.req.json();
+  if (!body.username || !body.password) {
+    throw new HTTPException(400, { message: 'username and password are required' });
+  }
+  const user = await findUserByUsername(body.username);
+
+  // fail the same way whether the user is missing OR the password is wrong
+  const ok = user && await verifyPassword(body.password, user.passwordHash);
+  if (!ok) {
+    throw new HTTPException(401, { message: 'invalid username or password' });
+  }
+
+  const sessionId = await createSession(user._id);
+  setSessionCookie(c, sessionId);
+  return c.json({ _id: user._id, username: user.username });  // never return the hash
+});
+
+// LOGOUT
+app.post('/api/auth/logout', async (c) => {
+  const sessionId = getCookie(c, COOKIE);
+  if (sessionId) {
+    await deleteSession(sessionId);   // kill it server-side (real revocation)
+  }
+  deleteCookie(c, COOKIE, { path: '/' });
+  return c.json({ ok: true });
+});
+
+// ME — who am I?
+app.get('/api/auth/me', async (c) => {
+  const user = await getCurrentUser(c);
+  if (!user) {
+    throw new HTTPException(401, { message: 'not logged in' });
+  }
+  return c.json(user);
+});
+
+// central error handler (keep this near the bottom)
+app.onError((err, c) => {
+  if (err instanceof HTTPException) return err.getResponse();
+  console.error(err);
+  return c.json({ error: 'Internal error' }, 500);
+});
 
 app.get('/', (c) => c.text('Arcade API is running'));
-
-
 
 serve({ fetch: app.fetch, port: Number(process.env.PORT) || 3000 });
 console.log('http://localhost:3000');
