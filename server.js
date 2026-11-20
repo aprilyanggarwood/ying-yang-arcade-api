@@ -140,7 +140,6 @@ app.post('/api/games/:id/join', async (c) => {
   }
 
   const updated = await joinGame(game._id, user._id);
-//   return c.json(updated);
      return c.json(gameForViewer(updated, user._id));     // ← hide opponent's ships
 });
 
@@ -216,6 +215,14 @@ app.get('/api/games/:id', async (c) => {
   return c.json(gameForViewer(game, user._id));
 });
 
+// in ying-yang-arcade-api/server.js
+app.onError((err, c) => {
+  if (err instanceof HTTPException) {
+    return c.json({ message: err.message }, err.status);
+  }
+  console.error(err);
+  return c.json({ error: 'Internal error' }, 500);
+});
 
 
 app.get('/', (c) => c.text('Arcade API is running'));
