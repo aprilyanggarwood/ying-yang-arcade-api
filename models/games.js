@@ -1,8 +1,7 @@
 // models/games.js
 import { db } from '../db.js';
 import { ObjectId } from 'mongodb';
-import { createRandomBoard } from '@april-cs-npm/arcade-core';
-import { isValidShot, updateBoard, isGameComplete } from '@april-cs-npm/arcade-core';
+import { createRandomBoard, isValidShot, updateBoard, isGameComplete } from '@april-cs-npm/arcade-core';
 
 const games = db.collection('games');
 
@@ -87,4 +86,25 @@ export async function applyShot(game, shooterId, row, col) {
 
   await games.updateOne({ _id: game._id }, { $set: update });
   return { game: await findGame(game._id) };
+}
+
+
+// replace un-hit 'ship' cells with 'empty' so ship positions stay hidden
+function hideShips(board) {
+  if (!board) return null;
+  return board.map((row) =>
+    row.map((cell) => (cell === 'ship' ? 'empty' : cell))
+  );
+}
+
+// return the game as THIS viewer is allowed to see it
+export function gameForViewer(game, viewerId) {
+  const viewerIsP1 = String(game.player1) === String(viewerId);
+
+  return {
+    ...game,
+    // you see your own board in full; the opponent's board has ships hidden
+    board1: viewerIsP1 ? game.board1 : hideShips(game.board1),
+    board2: viewerIsP1 ? hideShips(game.board2) : game.board2,
+  };
 }

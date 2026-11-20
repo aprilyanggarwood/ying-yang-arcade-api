@@ -8,8 +8,7 @@ import { db } from './db.js';
 import { createUser, findUserByUsername, findUserById } from './models/users.js';
 import { verifyPassword } from './auth.js';
 import { createSession, findSession, deleteSession } from './models/sessions.js';
-import { createRandomBoard } from '@april-cs-npm/arcade-core';
-import { createGame, listGames, findGame, joinGame, applyShot } from './models/games.js';
+import { createGame, listGames, findGame, joinGame, applyShot, gameForViewer } from './models/games.js';
 
 
 
@@ -28,7 +27,6 @@ async function getCurrentUser(c) {
   const sessionId = getCookie(c, COOKIE);
   const session = await findSession(sessionId);
   if (!session) return null;
-  const { findUserById } = await import('./models/users.js');
   return await findUserById(session.userId);
 }
 
@@ -142,7 +140,8 @@ app.post('/api/games/:id/join', async (c) => {
   }
 
   const updated = await joinGame(game._id, user._id);
-  return c.json(updated);
+//   return c.json(updated);
+     return c.json(gameForViewer(updated, user._id));     // ← hide opponent's ships
 });
 
 
@@ -191,8 +190,33 @@ app.post('/api/games/:id/shots', async (c) => {
     throw new HTTPException(400, { message: result.error });
   }
 
-  return c.json(result.game);
+  return c.json(gameForViewer(result.game, user._id));
 });
+
+
+// GET one game (board hidden appropriately for the viewer)
+app.get('/api/games/:id', async (c) => {
+  const user = await getCurrentUser(c);
+  if (!user) {
+    throw new HTTPException(401, { message: 'not logged in' });
+  }
+
+  const game = await findGame(c.req.param('id'));
+  if (!game) {
+    throw new HTTPException(404, { message: 'game not found' });
+  }
+
+  // only the two players may view it
+  const isP1 = String(game.player1) === String(user._id);
+  const isP2 = String(game.player2) === String(user._id);
+  if (!isP1 && !isP2) {
+    throw new HTTPException(403, { message: 'you are not in this game' });
+  }
+
+  return c.json(gameForViewer(game, user._id));
+});
+
+
 
 app.get('/', (c) => c.text('Arcade API is running'));
 
