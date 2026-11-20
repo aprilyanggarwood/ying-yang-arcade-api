@@ -2,6 +2,7 @@
 import { db } from '../db.js';
 import { ObjectId } from 'mongodb';
 import { createRandomBoard } from '@april-cs-npm/arcade-core';
+import { isValidShot, updateBoard, isGameComplete } from '@april-cs-npm/arcade-core';
 
 const games = db.collection('games');
 
@@ -53,4 +54,37 @@ export async function joinGame(id, player2Id) {
       } }
   );
   return await findGame(id);
+}
+
+
+// apply a shot fired by `shooterId` at (row, col). returns { game, error }
+export async function applyShot(game, shooterId, row, col) {
+  // which board does this shot hit? the OPPONENT's board.
+  const shooterIsP1 = String(game.player1) === String(shooterId);
+  const targetBoardField = shooterIsP1 ? 'board2' : 'board1';
+  const targetBoard = game[targetBoardField];
+
+  // reject illegal shots (out of bounds or already shot) using arcade-core
+  if (!isValidShot(targetBoard, row, col)) {
+    return { error: 'invalid shot' };
+  }
+
+  // apply the shot -> new board
+  const newBoard = updateBoard(targetBoard, row, col);
+
+  // did that finish the game?
+  const complete = isGameComplete(newBoard);
+
+  // figure out the next turn (the OTHER player), unless the game is over
+  const otherPlayer = shooterIsP1 ? game.player2 : game.player1;
+
+  const update = {
+    [targetBoardField]: newBoard,                 // update the right board
+    turn: complete ? game.turn : otherPlayer,     // keep turn if over, else switch
+    status: complete ? 'complete' : 'active',
+    winner: complete ? shooterId : null,
+  };
+
+  await games.updateOne({ _id: game._id }, { $set: update });
+  return { game: await findGame(game._id) };
 }

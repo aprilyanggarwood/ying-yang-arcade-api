@@ -9,7 +9,7 @@ import { createUser, findUserByUsername, findUserById } from './models/users.js'
 import { verifyPassword } from './auth.js';
 import { createSession, findSession, deleteSession } from './models/sessions.js';
 import { createRandomBoard } from '@april-cs-npm/arcade-core';
-import { createGame, listGames, findGame, joinGame } from './models/games.js';
+import { createGame, listGames, findGame, joinGame, applyShot } from './models/games.js';
 
 
 
@@ -146,7 +146,53 @@ app.post('/api/games/:id/join', async (c) => {
 });
 
 
+// FIRE a shot
+app.post('/api/games/:id/shots', async (c) => {
+  // 1. logged in?
+  const user = await getCurrentUser(c);
+  if (!user) {
+    throw new HTTPException(401, { message: 'not logged in' });
+  }
 
+  // 2. game exists?
+  const game = await findGame(c.req.param('id'));
+  if (!game) {
+    throw new HTTPException(404, { message: 'game not found' });
+  }
+
+  // 3. are you a player in this game?
+  const isP1 = String(game.player1) === String(user._id);
+  const isP2 = String(game.player2) === String(user._id);
+  if (!isP1 && !isP2) {
+    throw new HTTPException(403, { message: 'you are not in this game' });
+  }
+
+  // 4. is the game active? (not waiting, not complete)
+  if (game.status !== 'active') {
+    throw new HTTPException(409, { message: 'game is not active' });
+  }
+
+  // 5. is it your turn? (the heart of server-authoritative play)
+  if (String(game.turn) !== String(user._id)) {
+    throw new HTTPException(409, { message: 'not your turn' });
+  }
+
+  // 6. read and validate the shot coordinates from the body
+  const body = await c.req.json();
+  if (typeof body.row !== 'number' || typeof body.col !== 'number') {
+    throw new HTTPException(400, { message: 'row and col must be numbers' });
+  }
+
+  // 7. apply the shot via the model (which uses arcade-core)
+  const result = await applyShot(game, user._id, body.row, body.col);
+
+  // 8. applyShot returns { error } for an illegal shot
+  if (result.error) {
+    throw new HTTPException(400, { message: result.error });
+  }
+
+  return c.json(result.game);
+});
 
 app.get('/', (c) => c.text('Arcade API is running'));
 
