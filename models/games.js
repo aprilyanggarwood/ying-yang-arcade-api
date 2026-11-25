@@ -4,6 +4,7 @@ import { ObjectId } from 'mongodb';
 import { createRandomBoard, isValidShot, updateBoard, isGameComplete } from '@april-cs-npm/arcade-core';
 
 const games = db.collection('games');
+const users = db.collection('users');
 
 // create a new game with player1's board; player2 joins later
 export async function createGame(player1Id) {
@@ -24,16 +25,21 @@ export async function createGame(player1Id) {
 
 // list open games (waiting) plus games this user is in — without the boards
 export async function listGames(userId) {
-  return await games
-    .find({
-      $or: [
-        { status: 'waiting' },     // joinable games
-        { player1: userId },       // my games
-        { player2: userId },
-      ],
-    })
-    .project({ board1: 0, board2: 0 })   // omit boards from the list
-    .toArray();
+  const games_ = await games.find({
+    $or: [{ status: 'waiting' }, { player1: userId }, { player2: userId }],
+  }).project({ board1: 0, board2: 0 }).toArray();
+
+  // attach usernames for both players
+  for (const g of games_) {
+    g.player1Name = await usernameFor(g.player1);
+    g.player2Name = g.player2 ? await usernameFor(g.player2) : null;
+  }
+  return games_;
+}
+
+async function usernameFor(id) {
+  const u = await users.findOne({ _id: id });   // id is already an ObjectId here
+  return u ? u.username : 'unknown';
 }
 
 // find one game by id (or null)
